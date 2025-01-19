@@ -9,7 +9,7 @@
 
 DirScribe is a **lightweight yet powerful** CLI tool and Python library for **exporting directory structures** in either **text** or **JSON** format. It helps you **optionally** include file contents, **detect programming languages**, skip hidden items, limit file reading by size, show metadata (size and modification time), and output results directly to your terminal or a file.
 
-Created by: Kazuki Kawamura (Caspy /ˈkæspi/, かすぴー)  
+> Created by: [Kazuki Kawamura](https://casp.jp) (Caspy /ˈkæspi/, かすぴー)  
 > **License:** [MIT License](./LICENSE)
 
 ## Quick Look
