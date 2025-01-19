@@ -1,0 +1,15 @@
+# ------------------------------------------------------------------------------
+# MANIFEST.in
+# ------------------------------------------------------------------------------
+# Include license and key project files
+include LICENSE
+include README.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include CHANGELOG.md
+
+# Include the tests folder
+recursive-include tests *
+
+# Exclude unwanted files (like compiled Python files)
+global-exclude __pycache__ *.py[cod]
