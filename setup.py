@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 from setuptools import setup, find_packages
+
+
+this_directory = os.path.abspath(os.path.dirname(__file__))
+with open(os.path.join(this_directory, "README.md"), encoding="utf-8") as f:
+    long_description = f.read()
 
 setup(
     name="dirscribe",
-    version="0.1.0",
+    version="0.1.1",
     description="A tool to export directory structure and optionally include file contents for selected extensions.",
-    long_description="DirScribe is a Python package and CLI that helps you turn a directory's structure into text, with optional file content inclusion.",
-    long_description_content_type="text/markdown",
+    long_description=long_description,
+    long_description_content_type="text/markdown", 
     author="Kazuki Kawamura",
     url="https://github.com/kkwmr/dirscribe",
     packages=find_packages(),
