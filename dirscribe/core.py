@@ -4,11 +4,15 @@
 import argparse
 import json
 import time
+import sys
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any, Tuple
+from typing import List, Optional, Union, Dict, Any
 
+try:
+    import pyperclip
+except ImportError:
+    pyperclip = None
 
-#: A default dictionary for mapping file extensions to language names.
 LANGUAGE_MAP = {
     ".py": "Python",
     ".js": "JavaScript",
@@ -32,52 +36,37 @@ def scan_directory(
     skip_hidden: bool = False,
     max_size: Optional[int] = None,
     show_metadata: bool = False,
-    detect_language: bool = False
+    detect_language: bool = False,
+    exclude_extensions: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Recursively scans the target directory and builds a nested dictionary
     representing directories and files. File contents are included only for
-    certain extensions if specified. Additional features include skipping hidden
-    files/folders, limiting file read size, adding metadata, and detecting
-    programming language based on file extension.
+    certain extensions if specified.
 
     Args:
         target_dir (Path):
             The directory path to scan.
         include_extensions (List[str], optional):
-            List of file extensions (e.g., [".py", ".txt"]) whose contents
-            should be included. If None or empty, contents are not included.
+            A list of file extensions to include content for. If None, all files are included.
+            If an empty list, no file content is included.
         skip_hidden (bool):
-            If True, hidden files and directories (name starts with '.') are skipped.
+            If True, hidden files and directories (names starting with '.') are skipped.
         max_size (int, optional):
-            Maximum file size (in bytes) to read. Files exceeding this size
-            will not have their contents read.
+            Maximum file size in bytes to read. Files larger than this are skipped.
         show_metadata (bool):
-            If True, include file metadata (size, modification time).
+            If True, file metadata (size, modified time) is included in the output.
         detect_language (bool):
-            If True, attach a "language" field in the result based on file extension.
+            If True, a "language" field is added to each file based on extension.
+        exclude_extensions (List[str], optional):
+            A list of file extensions to exclude from the output entirely.
 
     Returns:
-        Dict[str, Any]:
-            A nested dictionary structure describing the directory tree.
-            Example structure:
-            {
-              "type": "directory",
-              "name": "some_dir",
-              "path": "/absolute/path/to/some_dir",
-              "children": [
-                {
-                  "type": "file",
-                  "name": "main.py",
-                  "path": "...",
-                  "language": "Python",
-                  "content": "...",
-                  "metadata": {...}
-                },
-                ...
-              ]
-            }
+        Dict[str, Any]: A nested dictionary describing the directory structure.
     """
+    if exclude_extensions is None:
+        exclude_extensions = []
+
     if not target_dir.exists():
         return {
             "type": "error",
@@ -101,7 +90,6 @@ def scan_directory(
         return tree
 
     for entry in entries:
-        # Skip hidden files/directories if skip_hidden == True
         if skip_hidden and entry.name.startswith('.'):
             continue
 
@@ -112,33 +100,45 @@ def scan_directory(
                 skip_hidden=skip_hidden,
                 max_size=max_size,
                 show_metadata=show_metadata,
-                detect_language=detect_language
+                detect_language=detect_language,
+                exclude_extensions=exclude_extensions
             )
             tree["children"].append(subtree)
         else:
+            if entry.suffix.lower() in [ext.lower() for ext in exclude_extensions]:
+                continue
+
             file_node = {
                 "type": "file",
                 "name": entry.name,
                 "path": str(entry.resolve())
             }
 
-            # Detect language if requested
             if detect_language:
                 lang = LANGUAGE_MAP.get(entry.suffix.lower())
                 if lang:
                     file_node["language"] = lang
 
-            # Show metadata if requested
             if show_metadata:
                 file_node["metadata"] = _get_file_metadata(entry)
 
-            # Include file content if extension is in include_extensions
             if include_extensions and len(include_extensions) > 0:
-                if entry.suffix.lower() in [ext.lower() for ext in include_extensions]:
-                    if max_size is not None and entry.stat().st_size > max_size:
-                        file_node["content"] = f"<<File size exceeds {max_size} bytes, skipping content>>"
-                    else:
-                        file_node["content"] = _read_file_content(entry)
+                if "ALL_MODE" in include_extensions:
+                    should_include = True
+                else:
+                    should_include = (entry.suffix.lower() in [ext.lower() for ext in include_extensions])
+            elif include_extensions is None:
+                should_include = True
+            else:
+                should_include = False
+
+            if should_include:
+                size = entry.stat().st_size
+                if max_size is not None and size > max_size:
+                    file_node["content"] = f"<<File size exceeds {max_size} bytes, skipping content>>"
+                else:
+                    file_node["content"] = _read_file_content(entry)
+
             tree["children"].append(file_node)
 
     return tree
@@ -149,17 +149,13 @@ def build_text_output(tree: Dict[str, Any], indent_level: int = 0) -> List[str]:
     Builds a list of text lines (ASCII tree style) from the nested dictionary.
 
     Args:
-        tree (Dict[str, Any]):
-            A dictionary structure as returned by scan_directory().
-        indent_level (int):
-            Internal parameter for recursion to manage text indentation.
+        tree (Dict[str, Any]): The directory structure dictionary returned by scan_directory().
+        indent_level (int): Internal parameter for managing indentation in recursion.
 
     Returns:
-        List[str]:
-            A list of lines representing the directory tree and file contents.
+        List[str]: A list of text lines representing the directory tree and optional contents.
     """
     lines = []
-
     node_type = tree.get("type")
     node_name = tree.get("name", "unknown")
 
@@ -173,9 +169,7 @@ def build_text_output(tree: Dict[str, Any], indent_level: int = 0) -> List[str]:
         children = tree.get("children", [])
         for child in children:
             lines.extend(build_text_output(child, indent_level + 1))
-
     elif node_type == "file":
-        # Show file with language if present
         language = tree.get("language")
         if language:
             lines.append("  " * indent_level + f"📄 {node_name} ({language})")
@@ -203,37 +197,30 @@ def export_directory_structure(
     show_metadata: bool = False,
     detect_language: bool = False,
     output_format: str = "text",
-    output_file: Optional[Path] = None
+    output_file: Optional[Path] = None,
+    exclude_extensions: Optional[List[str]] = None
 ) -> Union[List[str], str]:
     """
     Scans the directory and produces output in either text or JSON format.
     Optionally writes the result to a file if output_file is specified.
 
     Args:
-        target_dir (Path):
-            The directory path to scan.
-        include_extensions (List[str], optional):
-            File extensions to include content for (e.g., [".py", ".txt"]).
-        skip_hidden (bool):
-            Whether to skip hidden files/directories.
-        max_size (int, optional):
-            Maximum file size (in bytes) to read. If None, no limit is enforced.
-        show_metadata (bool):
-            If True, include file metadata.
-        detect_language (bool):
-            If True, attempt to detect code language based on file extension.
-        output_format (str):
-            Output format: "text" or "json". Default is "text".
-        output_file (Path, optional):
-            If provided, the resulting output will be written to this file
-            instead of being returned.
+        target_dir (Path): The directory to scan.
+        include_extensions (List[str], optional): File extensions to include contents for.
+            If None, includes all. If empty, includes none.
+        skip_hidden (bool): Whether to skip hidden files/directories.
+        max_size (int, optional): Maximum file size in bytes to read. Larger files are skipped.
+        show_metadata (bool): Whether to include file metadata in the output.
+        detect_language (bool): Whether to add a 'language' field based on file extension.
+        output_format (str): 'text' or 'json'. Default is 'text'.
+        output_file (Path, optional): If specified, the output is written to this file.
+        exclude_extensions (List[str], optional): File extensions to exclude entirely.
 
     Returns:
         Union[List[str], str]:
-            - If output_format="text" and output_file is None, returns a list of lines.
-            - If output_format="json" and output_file is None, returns a JSON string.
-            - If output_file is specified, the function writes to that file and
-              returns an empty string or list (depending on the format) for convenience.
+            - If output_format='text' and output_file is None, returns a list of lines.
+            - If output_format='json' and output_file is None, returns a JSON string.
+            - If output_file is specified, writes to file and returns an empty list or string.
     """
     tree = scan_directory(
         target_dir=target_dir,
@@ -241,31 +228,27 @@ def export_directory_structure(
         skip_hidden=skip_hidden,
         max_size=max_size,
         show_metadata=show_metadata,
-        detect_language=detect_language
+        detect_language=detect_language,
+        exclude_extensions=exclude_extensions
     )
 
     if output_format not in ["text", "json"]:
         raise ValueError("Invalid output format. Choose 'text' or 'json'.")
 
-    # Build output (text or json)
     if output_format == "text":
-        output_data = build_text_output(tree, indent_level=0)  # list of strings
+        output_data = build_text_output(tree)
     else:
-        output_data = json.dumps(tree, indent=2)  # JSON string
+        output_data = json.dumps(tree, indent=2)
 
-    # If an output_file is specified, write the data and return an empty list/string
     if output_file is not None:
         if output_format == "text":
-            # Join lines with newline
             text_content = "\n".join(output_data)
             output_file.write_text(text_content, encoding="utf-8")
             return []
         else:
-            # JSON string
             output_file.write_text(output_data, encoding="utf-8")
             return ""
     else:
-        # Return the data directly
         return output_data
 
 
@@ -280,7 +263,14 @@ def main():
     parser.add_argument("directory", type=str, help="Path to the directory to scan.")
     parser.add_argument(
         "-e", "--extensions", nargs="*", default=[],
-        help="List of file extensions to include content for (e.g. -e .py .txt)."
+        help=(
+            "List of file extensions to include content for (e.g. -e .py .txt). "
+            "If '-e' or '--extensions' is passed with no arguments, all file contents will be included."
+        )
+    )
+    parser.add_argument(
+        "-x", "--exclude-extensions", nargs="*", default=[],
+        help="List of file extensions to exclude from the output entirely."
     )
     parser.add_argument(
         "--skip-hidden", action="store_true",
@@ -288,7 +278,7 @@ def main():
     )
     parser.add_argument(
         "--max-size", type=int, default=None,
-        help="Maximum file size (bytes) to read. Larger files will be skipped."
+        help="Maximum file size (in bytes) to read. Larger files will be skipped."
     )
     parser.add_argument(
         "--show-metadata", action="store_true",
@@ -296,7 +286,7 @@ def main():
     )
     parser.add_argument(
         "--detect-language", action="store_true",
-        help="Attach a 'language' field based on file extension (e.g., '.py' -> 'Python')."
+        help="Attach a 'language' field based on file extension."
     )
     parser.add_argument(
         "--output-format", choices=["text", "json"], default="text",
@@ -306,46 +296,62 @@ def main():
         "--output-file", type=str, default=None,
         help="If specified, write the output to this file instead of stdout."
     )
+    parser.add_argument(
+        "--clip", action="store_true",
+        help="Copy the output to the clipboard (requires pyperclip)."
+    )
 
     args = parser.parse_args()
-
     directory = Path(args.directory).resolve()
+
+    use_all_extensions = False
+    if (("-e" in sys.argv) or ("--extensions" in sys.argv)) and len(args.extensions) == 0:
+        use_all_extensions = True
+
+    if use_all_extensions:
+        include_exts = None
+    else:
+        include_exts = args.extensions
+
     output_file = Path(args.output_file).resolve() if args.output_file else None
 
     result = export_directory_structure(
         target_dir=directory,
-        include_extensions=args.extensions,
+        include_extensions=include_exts,
         skip_hidden=args.skip_hidden,
         max_size=args.max_size,
         show_metadata=args.show_metadata,
         detect_language=args.detect_language,
         output_format=args.output_format,
-        output_file=output_file
+        output_file=output_file,
+        exclude_extensions=args.exclude_extensions
     )
 
-    # If output_file was specified, nothing is printed to stdout (by design).
-    # Otherwise, print the result to stdout.
+    if args.clip:
+        if pyperclip is None:
+            print("[ERROR] Cannot copy to clipboard because 'pyperclip' is not installed.")
+        else:
+            if args.output_format == "text":
+                if isinstance(result, list):
+                    text_output = "\n".join(result)
+                else:
+                    text_output = "\n".join(result) if result else ""
+                pyperclip.copy(text_output)
+            else:
+                json_output = result if isinstance(result, str) else ""
+                pyperclip.copy(json_output)
+
     if not output_file:
         if args.output_format == "text":
-            # 'result' is a list of lines
             for line in result:  # type: ignore
                 print(line)
         else:
-            # 'result' is a JSON string
             print(result)  # type: ignore
 
 
 def _read_file_content(file_path: Path) -> str:
     """
-    Safely reads text content from a file using UTF-8 (replace errors).
-
-    Args:
-        file_path (Path):
-            Path object for the file to read.
-
-    Returns:
-        str:
-            The file's text content (with unknown chars replaced).
+    Safely reads text content from the specified file using UTF-8 with error replacement.
     """
     try:
         return file_path.read_text(encoding="utf-8", errors="replace")
@@ -355,15 +361,7 @@ def _read_file_content(file_path: Path) -> str:
 
 def _get_file_metadata(file_path: Path) -> Dict[str, Union[int, str]]:
     """
-    Retrieves basic metadata: file size in bytes, last modified time in ISO format.
-
-    Args:
-        file_path (Path):
-            Path object to the file.
-
-    Returns:
-        Dict[str, Union[int, str]]:
-            A dictionary containing file size and modified timestamp (ISO).
+    Retrieves basic metadata: file size in bytes and last modified time in ISO format.
     """
     size = file_path.stat().st_size
     mtime = file_path.stat().st_mtime
