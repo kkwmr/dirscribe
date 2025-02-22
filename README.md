@@ -19,6 +19,7 @@ One of DirScribe's key features is how easily it can include file contents by ex
 - If you omit `-e` entirely, no file contents are included—just the directory tree.
 
 Another new feature in v0.1.2 is `--clip`, which copies the final output (text or JSON) to your clipboard for quick sharing.
+Another new feature in **v0.1.3** is `--exclude-extensions`, which allows you to completely skip certain file types in the output (e.g., `--exclude-extensions .md .rst`). You can also copy the result to your clipboard with `--clip` (requires `pyperclip`, which is now installed automatically).
 
 **Example**:
 ```bash
@@ -101,6 +102,9 @@ You get:
 - File Content Inclusion
   - Display the contents of files for specific extensions (e.g., .py, .js, .txt).
   - Tip: With v0.1.2, if you add `-e` with no extensions, all file contents are included.
+
+- Exclude Extensions
+  - Use --exclude-extensions (new in v0.1.3) to completely skip unwanted file types.
 
 - Language Detection
   - Show the programming language name (e.g., .py -> Python) alongside file names.
